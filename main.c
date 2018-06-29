@@ -385,58 +385,80 @@ create_repo (Pool       *pool,
 }
 
 static Solver *
-solve (Pool *pool, Queue *jobs)
+solve (Pool *pool, Queue *jobs, Repo *fake_provides)
 {
+  gboolean retry = TRUE;
+  int pbcnt = 0;
   Solver *solver = solver_create (pool);
 
-  int pbcnt = solver_solve (solver, jobs);
+  while (retry) {
+    /* Try to run the solver, and only try again if there is a problem and we
+     * add a new fake provide to work around the problem. */
+    retry = FALSE;
 
-  if (pbcnt)
+    pbcnt = solver_solve (solver, jobs);
+
+    if (pbcnt)
     {
       pbcnt = solver_problem_count (solver);
       for (int problem = 1; problem <= pbcnt; problem++)
+      {
+        Queue rids, rinfo;
+        queue_init (&rids);
+        queue_init (&rinfo);
+
+        g_print ("Problem %i / %i:\n", problem, pbcnt);
+
+        solver_findallproblemrules (solver, problem, &rids);
+        for (int i = 0; i < rids.count; i++)
         {
-          Queue rids, rinfo;
-          queue_init (&rids);
-          queue_init (&rinfo);
+          Id probr = rids.elements[i];
 
-          g_print ("Problem %i / %i:\n", problem, pbcnt);
-
-          solver_findallproblemrules (solver, problem, &rids);
-          for (int i = 0; i < rids.count; i++)
+          queue_empty (&rinfo);
+          solver_allruleinfos (solver, probr, &rinfo);
+          for (int j = 0; j < rinfo.count; j += 4)
+          {
+            SolverRuleinfo type = rinfo.elements[j];
+            Id source = rinfo.elements[j + 1];
+            Id target = rinfo.elements[j + 2];
+            Id dep = rinfo.elements[j + 3];
+            const char *pbstr = solver_problemruleinfo2str (solver, type, source, target, dep);
+            g_print ("  - %s\n", pbstr);
+            if (type == SOLVER_RULE_PKG_NOTHING_PROVIDES_DEP)
             {
-              Id probr = rids.elements[i];
+              const char *mdstr = pool_dep2str(pool, dep);
+              g_print ("  - ADD FAKE PROVIDER FOR DEP %s AND TRY TO CONTINUE\n", mdstr);
 
-              queue_empty (&rinfo);
-              solver_allruleinfos (solver, probr, &rinfo);
-              for (int j = 0; j < rinfo.count; j += 4)
-                {
-                  SolverRuleinfo type = rinfo.elements[j];
-                  Id source = rinfo.elements[j + 1];
-                  Id target = rinfo.elements[j + 2];
-                  Id dep = rinfo.elements[j + 3];
-                  const char *pbstr = solver_problemruleinfo2str (solver, type, source, target, dep);
-                  g_print ("  - %s\n", pbstr);
-                  if (type == SOLVER_RULE_PKG_NOTHING_PROVIDES_DEP)
-                    {
-                      const char *mdstr = pool_dep2str(pool, dep);
-                      g_print ( "  - ADD FAKE PROVIDER FOR DEP %s AND TRY TO CONTINUE\n", mdstr);
-                      /* TODO: add the fake dep back into the pool and then loop back to the solver
-		       * Do so in a way that we can read fakes back out at the end as distinct from real
-		       * packages */
-		      /* TODO: The actual enum of problem types appears to be quite larger.  Find any
-		       * others that can result in fake providers and ensure they are added here as well
-		       * For reference, this is the string generator function called above to generate
-		       * human readable error messages:
-		       * https://github.com/openSUSE/libsolv/blob/master/src/problems.c#L1250 */
-		    }
-		}
+              Solvable *solvable = pool_id2solvable (pool, repo_add_solvable (fake_provides));
+              solvable->name = pool_str2id (pool, mdstr, 1);
+              solvable->evr = ID_EMPTY;
+              /* TODO: what if the dep has explicit arch? */
+              solvable->arch = pool_str2id (pool, "noarch", 1);
+              Id sdep = pool_rel2id (pool, solvable->name, solvable->arch, REL_ARCH, 1);
+              solvable_add_deparray (solvable, SOLVABLE_PROVIDES, sdep, 0);
+              /* We added a new fake Provides, try the solver again. */
+              retry = TRUE;
+
+              /* TODO: add the fake dep back into the pool and then loop back to the solver
+               * Do so in a way that we can read fakes back out at the end as distinct from real
+               * packages */
+              /* TODO: The actual enum of problem types appears to be quite larger.  Find any
+               * others that can result in fake providers and ensure they are added here as well
+               * For reference, this is the string generator function called above to generate
+               * human readable error messages:
+               * https://github.com/openSUSE/libsolv/blob/master/src/problems.c#L1250 */
             }
+          }
         }
-
-      solver_free (solver);
-      return NULL;
+      }
     }
+  }
+
+  /* Last run of the solver reported problems, but we did not add any provides. */
+  if (pbcnt) {
+    solver_free (solver);
+    return NULL;
+  }
 
   g_autofree char *result = testcase_solverresult (solver, TESTCASE_RESULT_JOBS | TESTCASE_RESULT_ALTERNATIVES);
 
@@ -444,7 +466,7 @@ solve (Pool *pool, Queue *jobs)
 }
 
 static GArray *
-_gather_alternatives (Pool *pool, GArray *transactions, Queue *favor, GHashTable *tested, int level)
+_gather_alternatives (Pool *pool, GArray *transactions, Queue *favor, GHashTable *tested, int level, Repo *fake_provides)
 {
   g_auto(Queue) jobs;
   queue_init (&jobs);
@@ -458,7 +480,7 @@ _gather_alternatives (Pool *pool, GArray *transactions, Queue *favor, GHashTable
   while (g_hash_table_iter_next (&iter, &key, &value))
     queue_push2 (&jobs, SOLVER_SOLVABLE | SOLVER_DISFAVOR, GPOINTER_TO_INT (key));
 
-  g_autoptr(Solver) solver = solve (pool, &jobs);
+  g_autoptr(Solver) solver = solve (pool, &jobs, fake_provides);
 
   if (!solver)
     return transactions;
@@ -527,19 +549,19 @@ _gather_alternatives (Pool *pool, GArray *transactions, Queue *favor, GHashTable
           }
       if (all)
         break;
-      _gather_alternatives (pool, transactions, favor, tested, level);
+      _gather_alternatives (pool, transactions, favor, tested, level, fake_provides);
     }
 
   if (level == max_level)
     return transactions;
 
-  _gather_alternatives (pool, transactions, &favor_n, tested_n, level + 1);
+  _gather_alternatives (pool, transactions, &favor_n, tested_n, level + 1, fake_provides);
 
   return transactions;
 }
 
 static GArray *
-gather_alternatives (Pool *pool, Queue *jobs)
+gather_alternatives (Pool *pool, Queue *jobs, Repo *fake_provides)
 {
   GArray *transactions = g_array_new (FALSE, FALSE, sizeof (Queue));
   g_array_set_clear_func (transactions, (GDestroyNotify)queue_free);
@@ -549,7 +571,7 @@ gather_alternatives (Pool *pool, Queue *jobs)
 
   Queue pjobs = pool->pooljobs;
   pool->pooljobs = *jobs;
-  transactions = _gather_alternatives (pool, transactions, &favor, tested, 1);
+  transactions = _gather_alternatives (pool, transactions, &favor, tested, 1, fake_provides);
   pool->pooljobs = pjobs;
 
   return transactions;
@@ -619,6 +641,7 @@ main (int   argc,
   g_debug ("Setting architecture to %s", arch);
   pool_setarch (pool, arch);
 
+  Repo *fake_provides = repo_create (pool, "@fake_provides");
   Repo *system = repo_create (pool, "@system");
   pool_set_installed (pool, system);
   if (platform)
@@ -784,7 +807,7 @@ main (int   argc,
             {
               g_debug ("Installing %s:", pool_solvid2str (pool, p));
 
-              g_autoptr(Solver) solver = solve (pool, &job);
+              g_autoptr(Solver) solver = solve (pool, &job, fake_provides);
               if (solver)
                 {
                   g_autoptr(Transaction) trans = solver_create_transaction (solver);
@@ -804,7 +827,7 @@ main (int   argc,
           else
             {
               g_debug ("Searching combinations for %s", pool_solvid2str (pool, p));
-              g_autoptr(GArray) transactions = gather_alternatives (pool, &job);
+              g_autoptr(GArray) transactions = gather_alternatives (pool, &job, fake_provides);
 
               if (transactions->len == 0)
                 solv_failed = TRUE;
@@ -851,7 +874,7 @@ main (int   argc,
                           queue_push2 (&j, SOLVER_SOLVABLE | SOLVER_INSTALL, p);
                           g_debug ("    Installing %s:", pool_solvid2str (pool, p));
 
-                          g_autoptr(Solver) solver = solve (pool, &j);
+                          g_autoptr(Solver) solver = solve (pool, &j, fake_provides);
                           if (solver)
                             {
                               g_autoptr(Transaction) trans = solver_create_transaction (solver);
