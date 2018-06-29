@@ -417,7 +417,20 @@ solve (Pool *pool, Queue *jobs)
                   Id dep = rinfo.elements[j + 3];
                   const char *pbstr = solver_problemruleinfo2str (solver, type, source, target, dep);
                   g_print ("  - %s\n", pbstr);
-                }
+                  if (type == SOLVER_RULE_PKG_NOTHING_PROVIDES_DEP)
+                    {
+                      const char *mdstr = pool_dep2str(pool, dep);
+                      g_print ( "  - ADD FAKE PROVIDER FOR DEP %s AND TRY TO CONTINUE\n", mdstr);
+                      /* TODO: add the fake dep back into the pool and then loop back to the solver
+		       * Do so in a way that we can read fakes back out at the end as distinct from real
+		       * packages */
+		      /* TODO: The actual enum of problem types appears to be quite larger.  Find any
+		       * others that can result in fake providers and ensure they are added here as well
+		       * For reference, this is the string generator function called above to generate
+		       * human readable error messages:
+		       * https://github.com/openSUSE/libsolv/blob/master/src/problems.c#L1250 */
+		    }
+		}
             }
         }
 
