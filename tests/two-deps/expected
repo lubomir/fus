@@ -1,0 +1,6 @@
+module:m1:master:20180904161631:cafebabe.x86_64@yaml
+module:m2:master:20180904161631:cafebabe.x86_64@yaml
+module:m1-devel:master:20180904161631:cafebabe.x86_64@yaml
+*p1-1.0-1.x86_64@repo
+*p2-1.0-1.x86_64@repo
+*p3-1.0-1.x86_64@repo

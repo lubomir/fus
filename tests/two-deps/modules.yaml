@@ -1,0 +1,58 @@
+---
+document: modulemd
+version: 2
+data:
+  name: m1
+  stream: master
+  version: 20180904161631
+  context: cafebabe
+  arch: x86_64
+  dependencies:
+    - buildrequires:
+        platform: [f29]
+      requires:
+        platform: [f29]
+        m2: [master]
+  artifacts:
+    rpms:
+      - p1-0:1.0-1.x86_64
+...
+---
+document: modulemd
+version: 2
+data:
+  name: m2
+  stream: master
+  version: 20180904161631
+  context: cafebabe
+  arch: x86_64
+  dependencies:
+    - buildrequires:
+        platform: [f29]
+      requires:
+        platform: [f29]
+  artifacts:
+    rpms:
+      - p2-0:1.0-1.x86_64
+...
+---
+document: modulemd
+version: 2
+data:
+  name: m1-devel
+  stream: master
+  version: 20180904161631
+  context: cafebabe
+  arch: x86_64
+  dependencies:
+    - buildrequires:
+        platform: [f29]
+      requires:
+        platform: [f29]
+        m2: [master]
+    - requires:
+        m1: [master]
+  artifacts:
+    rpms:
+      - p3-0:1.0-1.x86_64
+...
