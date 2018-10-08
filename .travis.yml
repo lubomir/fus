@@ -1,6 +1,10 @@
-language: c
-install: meson
+sudo: required
+
+services:
+    - docker
+
+before_install:
+    - docker pull fedora:latest
+
 script:
-    - meson builddir
-    - ninja -C builddir
-    - G_TEST_SRCDIR=$(pwd)/tests ./builddir/tests
+    - docker run --rm -v $(pwd):/code fedora "dnf install meson libsolv-devel libmodulemd-devel && meson builddir && ninja -C builddir && G_TEST_SRCDIR=$(pwd)/tests ./builddir/tests"
