@@ -1,0 +1,6 @@
+language: c
+install: meson
+script:
+    - meson builddir
+    - ninja -C builddir
+    - G_TEST_SRCDIR=$(pwd)/tests ./builddir/tests
