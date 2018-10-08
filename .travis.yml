@@ -9,4 +9,4 @@ before_install:
     - docker pull fedora:latest
 
 script:
-    - docker run --rm -v $(pwd):/code fedora /bin/bash -c "dnf install -y meson libsolv-devel libmodulemd-devel && cd /code && meson builddir && ninja -C builddir test"
+    - docker run --rm -v $(pwd):/code fedora /bin/bash -c "dnf install -y gcc meson libsolv-devel libmodulemd-devel && cd /code && meson builddir && ninja -C builddir test"
